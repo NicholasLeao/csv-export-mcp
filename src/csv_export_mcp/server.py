@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """CSV Export MCP Server - Python implementation."""
 
-import asyncio
 import csv
 import json
-import os
 import sys
 import uuid
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import mcp.server.stdio
-import mcp.types as types
-from mcp.server import NotificationOptions, Server
-from pydantic import AnyUrl
+from mcp.server.fastmcp import FastMCP
 
 # Export directory configuration
 EXPORT_DIR = "/tmp/protex-intelligence-file-exports"
@@ -86,133 +81,76 @@ async def write_csv_to_file(csv_content: str, filename: str) -> str:
         raise
 
 
-# Create MCP server
-server = Server("csv-export-mcp")
+# Create FastMCP server
+mcp = FastMCP("csv-export-mcp")
 
 
-@server.list_tools()
-async def handle_list_tools() -> List[types.Tool]:
-    """List available tools."""
-    return [
-        types.Tool(
-            name="csv_export",
-            description="Export data to CSV format (mock - no persistence)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "description": "Array of objects to export as CSV",
-                        "items": {
-                            "type": "object",
-                        },
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": "Filename for the exported file (without extension)",
-                        "default": "output",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Optional description of the file contents",
-                    },
-                    "delimiter": {
-                        "type": "string",
-                        "description": "CSV delimiter character",
-                        "default": ",",
-                    },
-                    "includeHeaders": {
-                        "type": "boolean",
-                        "description": "Whether to include column headers",
-                        "default": True,
-                    },
-                },
-                "required": ["data"],
-            },
-        )
-    ]
-
-
-@server.call_tool()
-async def handle_call_tool(
-    name: str, arguments: Dict[str, Any]
-) -> List[types.TextContent]:
-    """Handle tool calls."""
-    if name == "csv_export":
-        try:
-            data = arguments.get("data")
-            filename = arguments.get("filename", "output")
-            description = arguments.get("description")
-            delimiter = arguments.get("delimiter", ",")
-            include_headers = arguments.get("includeHeaders", True)
-            
-            # Validate input
-            if not data or not isinstance(data, list):
-                raise ValueError("Data must be provided as an array of objects")
-            
-            if len(data) == 0:
-                raise ValueError("Data array cannot be empty")
-            
-            # Convert to CSV
-            csv_content = convert_to_csv(data, delimiter, include_headers)
-            
-            # Generate UUID and filename
-            file_uuid = str(uuid.uuid4())
-            sanitized_filename = "".join(c if c.isalnum() or c in "_-" else "_" for c in filename)
-            full_filename = f"{sanitized_filename}_{file_uuid}.csv"
-            file_size = get_file_size_string(csv_content)
-            row_count = len(data)
-            column_count = len(data[0].keys()) if data else 0
-            
-            # Write CSV to file system
-            filepath = await write_csv_to_file(csv_content, full_filename)
-            
-            print(f"✅ CSV generated: {full_filename} ({file_size})", file=sys.stderr)
-            print(f"   Rows: {row_count}, Columns: {column_count}", file=sys.stderr)
-            print(f"   Saved to: {filepath}", file=sys.stderr)
-            
-            # Return simplified response with essential information
-            result = {
-                "path": full_filename,
-                "filetype": "text/csv",
-                "filename": full_filename,
-                "filesize": file_size,
-            }
-            
-            return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
-            
-        except Exception as error:
-            print(f"Error processing CSV export: {error}", file=sys.stderr)
-            
-            error_result = {
-                "success": False,
-                "error": str(error),
-            }
-            
-            return [types.TextContent(type="text", text=json.dumps(error_result, indent=2))]
+@mcp.tool()
+async def csv_export(
+    data: List[Dict[str, Any]],
+    filename: str = "output",
+    description: str = None,
+    delimiter: str = ",",
+    include_headers: bool = True
+) -> dict:
+    """Export data to CSV format and save to filesystem.
     
-    raise ValueError(f"Unknown tool: {name}")
-
-
-async def main():
-    """Main server function."""
-    # Run the server using stdin/stdout streams
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        print("CSV Export MCP Server running on stdio", file=sys.stderr)
-        await server.run(
-            read_stream,
-            write_stream,
-            NotificationOptions(
-                tools_changed=False,
-                resources_changed=False,
-                prompts_changed=False
-            ),
-        )
+    Args:
+        data: Array of objects to export as CSV
+        filename: Filename for the exported file (without extension)
+        description: Optional description of the file contents
+        delimiter: CSV delimiter character
+        include_headers: Whether to include column headers
+        
+    Returns:
+        Dictionary with export results including path and file info
+    """
+    try:
+        # Validate input
+        if not data or not isinstance(data, list):
+            raise ValueError("Data must be provided as an array of objects")
+        
+        if len(data) == 0:
+            raise ValueError("Data array cannot be empty")
+        
+        # Convert to CSV
+        csv_content = convert_to_csv(data, delimiter, include_headers)
+        
+        # Generate UUID and filename
+        file_uuid = str(uuid.uuid4())
+        sanitized_filename = "".join(c if c.isalnum() or c in "_-" else "_" for c in filename)
+        full_filename = f"{sanitized_filename}_{file_uuid}.csv"
+        file_size = get_file_size_string(csv_content)
+        row_count = len(data)
+        column_count = len(data[0].keys()) if data else 0
+        
+        # Write CSV to file system
+        filepath = await write_csv_to_file(csv_content, full_filename)
+        
+        print(f"✅ CSV generated: {full_filename} ({file_size})", file=sys.stderr)
+        print(f"   Rows: {row_count}, Columns: {column_count}", file=sys.stderr)
+        print(f"   Saved to: {filepath}", file=sys.stderr)
+        
+        # Return simplified response with essential information
+        return {
+            "path": full_filename,
+            "filetype": "text/csv",
+            "filename": full_filename,
+            "filesize": file_size,
+        }
+        
+    except Exception as error:
+        print(f"Error processing CSV export: {error}", file=sys.stderr)
+        
+        return {
+            "success": False,
+            "error": str(error),
+        }
 
 
 def cli_main():
     """CLI entry point."""
-    asyncio.run(main())
+    mcp.run()
 
 
 if __name__ == "__main__":
