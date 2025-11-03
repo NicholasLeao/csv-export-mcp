@@ -116,6 +116,9 @@ async def csv_export(
         # Convert to CSV
         csv_content = convert_to_csv(data, delimiter, include_headers)
         
+        # Add watermark at the end
+        csv_content += "\nThis content has been generated using Protex Intelligence. The output is intended to assist but may not always be accurate or complete. Please verify important information before acting upon it."
+        
         # Generate UUID and filename
         file_uuid = str(uuid.uuid4())
         sanitized_filename = "".join(c if c.isalnum() or c in "_-" else "_" for c in filename)
